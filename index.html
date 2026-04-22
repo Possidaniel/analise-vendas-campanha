@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- saved from url=(0061)file:///C:/Users/daniel.possi/Downloads/analise_vendas_8.html -->
+<!-- saved from url=(0062)file:///C:/Users/daniel.possi/Downloads/analise_vendas_12.html -->
 <html lang="pt-BR"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -189,6 +189,8 @@
   .btn-export{display:flex;align-items:center;gap:5px;background:var(--surface3);border:1px solid var(--border);border-radius:7px;padding:5px 12px;cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:700;color:var(--text);transition:all 0.12s;white-space:nowrap;}
   .btn-export:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);}
   .btn-export-xl:hover{border-color:#1bbc6e;color:#1bbc6e;}
+  .btn-export-meta{border-color:rgba(245,200,66,0.35);color:var(--gold);}
+  .btn-export-meta:hover{border-color:var(--gold);color:var(--gold);background:rgba(245,200,66,0.08);}
 
   /* ── PRINT / PDF STYLES ── */
   @media print {
@@ -276,12 +278,24 @@
 
     <!-- EXPORT BUTTONS -->
     <div style="display:flex;flex-direction:column;gap:4px">
-      <button class="btn-export" onclick="exportPDF()" title="Relatório completo em PDF">
-        <span>📄</span> Exportar PDF
-      </button>
-      <button class="btn-export btn-export-xl" onclick="exportXLSX()" title="Relatório completo em Excel">
-        <span>📊</span> Exportar Excel
-      </button>
+      <div style="font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:2px">Relatório de Metas</div>
+      <div style="display:flex;gap:4px;margin-bottom:6px">
+        <button class="btn-export btn-export-meta" onclick="exportMetasPDF()" title="Relatório de metas para os representantes (PDF)">
+          <span>🎯</span> PDF Metas
+        </button>
+        <button class="btn-export btn-export-meta btn-export-xl" onclick="exportMetasXLSX()" title="Relatório de metas para os representantes (Excel)">
+          <span>📊</span> Excel Metas
+        </button>
+      </div>
+      <div style="font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:2px">Relatório de Apuração</div>
+      <div style="display:flex;gap:4px">
+        <button class="btn-export" onclick="exportPDF()" title="Relatório completo de apuração (PDF)">
+          <span>📄</span> PDF Apuração
+        </button>
+        <button class="btn-export btn-export-xl" onclick="exportXLSX()" title="Relatório completo de apuração (Excel)">
+          <span>📊</span> Excel Apuração
+        </button>
+      </div>
     </div>
 
   </div>
@@ -1234,5 +1248,178 @@ function exportXLSX(){
   XLSX.utils.book_append_sheet(wb, csSheet, 'CONSOLIDADO');
 
   XLSX.writeFile(wb, 'Relatorio_Campanha_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+
+/* ══ METAS REPORT DATA BUILDER ══ */
+function buildMetasData(){
+  if(appliedProducts.length === 0){ alert('Aplique o filtro de produtos antes de exportar.'); return null; }
+  var months = allMonths.filter(function(m){ return activeMonths.has(m); });
+  var hasPrize=false, hasMinAny=false;
+  for(var ai=0;ai<appliedPrizeVal.length;ai++) if(appliedPrizeVal[ai]>0){ hasPrize=true; break; }
+  for(var ai2=0;ai2<appliedMinQty.length;ai2++) if(appliedMinQty[ai2]>0){ hasMinAny=true; break; }
+
+  var vendors = Object.keys(allData).sort();
+  var pages = [];
+  for(var vi=0;vi<vendors.length;vi++){
+    var vendor=vendors[vi], vData=allData[vendor]||{}, rows=[], totalMeta=0;
+    for(var ri=0;ri<appliedProducts.length;ri++){
+      var ref=appliedProducts[ri].trim(); if(!ref) continue;
+      var rMin=appliedMinQty[ri]||0, rPrz=appliedPrizeVal[ri]||0;
+      var rc=calcAvg(vData,ref,months);
+      var monthVals=[];
+      for(var mi=0;mi<months.length;mi++) monthVals.push((vData[ref]&&vData[ref][months[mi]])?vData[ref][months[mi]]:0);
+      var metaGrowth=rc.avg*(1+growthPct/100);
+      var threshold=Math.max(metaGrowth,rMin);
+      var metaDisp=Math.ceil(threshold);
+      totalMeta+=metaDisp;
+      rows.push({ref:ref,monthVals:monthVals,avg:rc.avg,activeMonths:rc.active,minQ:rMin,metaDisp:metaDisp,byMin:rMin>0&&rMin>metaGrowth,prize:rPrz});
+    }
+    pages.push({vendor:vendor,months:months,rows:rows,totalMeta:totalMeta});
+  }
+  return {pages:pages,months:months,hasPrize:hasPrize,hasMinAny:hasMinAny};
+}
+
+/* ══ METAS PDF ══ */
+function exportMetasPDF(){
+  var data=buildMetasData(); if(!data) return;
+  var hasPrize=data.hasPrize, hasMinAny=data.hasMinAny;
+  var today=new Date().toLocaleDateString('pt-BR');
+
+  var css='body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:0;background:#fff;}'+
+    '.page{page-break-after:always;padding:14mm 12mm;}.page:last-child{page-break-after:avoid;}'+
+    '.hdr{font-size:17px;font-weight:900;}.hdr-sub{font-size:9px;color:#666;margin-bottom:12px;}'+
+    '.vname{font-size:13px;font-weight:800;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:10px;}'+
+    '.intro{font-size:10px;color:#333;line-height:1.6;margin-bottom:12px;padding:8px 12px;background:#fffbf0;border-left:3px solid #b8860b;}'+
+    'table{width:100%;border-collapse:collapse;font-size:10px;}'+
+    'thead tr{background:#1a1a2e;color:#fff;}'+
+    'th{padding:5px 7px;text-align:right;font-size:7.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;border:1px solid #333;}'+
+    'th:first-child{text-align:left;}'+
+    'td{padding:5px 7px;border:1px solid #e0e0e0;text-align:right;}'+
+    'td:first-child{text-align:left;font-weight:600;}'+
+    'tr:nth-child(even) td{background:#fafafa;}'+
+    'tfoot td{background:#efefef;font-weight:700;border-top:2px solid #999;}'+
+    '.mc{color:#b8860b;font-weight:800;font-size:11px;} .pc{color:#0a7c4e;font-weight:700;} .z{color:#bbb;}'+
+    '.n{font-size:7.5px;color:#888;display:block;margin-top:1px;} .bm{color:#e55b2b;font-size:8px;display:block;}'+
+    '.foot{font-size:8px;color:#888;margin-top:10px;padding:5px 8px;background:#f5f5f5;border-left:2px solid #ccc;}'+
+    '.sign{margin-top:20px;display:flex;gap:40px;} .sline{flex:1;border-top:1px solid #999;padding-top:4px;font-size:9px;color:#666;text-align:center;}'+
+    '@media print{@page{size:A4;margin:8mm;}.page{padding:0;}}';
+
+  var h='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Metas Campanha</title><style>'+css+'</style></head><body>';
+
+  for(var pi=0;pi<data.pages.length;pi++){
+    var pg=data.pages[pi]; if(!pg.rows||pg.rows.length===0) continue;
+    h+='<div class="page">';
+    h+='<div class="hdr">Metas da Campanha de Vendas</div>';
+    h+='<div class="hdr-sub">Gerado: '+today+' | Meta de crescimento: '+growthPct+'%</div>';
+    h+='<div class="vname">'+pg.vendor+'</div>';
+    h+='<div class="intro">Prezado(a) representante, seguem suas <strong>metas individuais por produto</strong>. ';
+    h+='A meta foi calculada sobre a media historica (excluindo meses sem venda), aplicando crescimento de <strong>'+growthPct+'%</strong>';
+    if(hasMinAny) h+=' ou a <strong>quantidade minima definida</strong> (vale o maior valor)';
+    h+='.';
+    if(hasPrize) h+=' O <strong>premio por peca</strong> sera pago sobre o total vendido ao atingir a meta.';
+    h+='</div>';
+    h+='<table><thead><tr><th>Referencia</th>';
+    for(var mi=0;mi<pg.months.length;mi++) h+='<th>'+fm3(pg.months[mi])+'</th>';
+    h+='<th>Media</th>';
+    if(hasMinAny) h+='<th>Minimo</th>';
+    h+='<th>META</th>';
+    if(hasPrize) h+='<th>Premio/pc</th>';
+    h+='</tr></thead><tbody>';
+
+    var footM=new Array(pg.months.length).fill(0), fAvg=0, fMeta=0;
+    for(var ri=0;ri<pg.rows.length;ri++){
+      var row=pg.rows[ri];
+      h+='<tr><td>'+row.ref+'</td>';
+      for(var mi2=0;mi2<row.monthVals.length;mi2++){
+        footM[mi2]+=row.monthVals[mi2];
+        h+=row.monthVals[mi2]===0?'<td class="z">-</td>':'<td>'+fmtBR(row.monthVals[mi2])+'</td>';
+      }
+      fAvg+=row.avg; fMeta+=row.metaDisp;
+      h+=row.avg===0?'<td class="z">-</td>':'<td>'+row.avg.toFixed(1)+'<span class="n">'+row.activeMonths+' mes(es)</span></td>';
+      if(hasMinAny) h+=row.minQ>0?'<td style="color:#e55b2b;font-weight:700">'+row.minQ+'</td>':'<td class="z">-</td>';
+      h+=row.metaDisp===0?'<td class="z">-</td>':'<td class="mc">'+fmtBR(row.metaDisp)+(row.byMin?'<span class="bm">pelo minimo</span>':'<span class="n">crescimento</span>')+'</td>';
+      if(hasPrize) h+=row.prize>0?'<td class="pc">R$ '+row.prize.toFixed(2)+'</td>':'<td class="z">-</td>';
+      h+='</tr>';
+    }
+    h+='</tbody><tfoot><tr><td>TOTAL</td>';
+    for(var fi=0;fi<footM.length;fi++) h+='<td>'+fmtBR(footM[fi])+'</td>';
+    h+='<td>'+fAvg.toFixed(1)+'</td>';
+    if(hasMinAny) h+='<td>-</td>';
+    h+='<td class="mc">'+fmtBR(fMeta)+'</td>';
+    if(hasPrize) h+='<td>-</td>';
+    h+='</tr></tfoot></table>';
+    h+='<div class="foot">Regra: media exclui meses com zero vendas. Meta = max(media x (1+'+growthPct+'%), minimo).'+(hasPrize?' Premio pago sobre total de pecas ao atingir a meta.':'')+'</div>';
+    h+='<div class="sign"><div class="sline">Representante / Data</div><div class="sline">Empresa / Data</div></div>';
+    h+='</div>';
+  }
+  h+='</body></html>';
+
+  var win=window.open('','_blank');
+  if(!win){ alert('Permita pop-ups e tente novamente.'); return; }
+  win.document.open(); win.document.write(h); win.document.close();
+  setTimeout(function(){ win.focus(); win.print(); },800);
+}
+
+/* ══ METAS EXCEL ══ */
+function exportMetasXLSX(){
+  var data=buildMetasData(); if(!data) return;
+  var hasPrize=data.hasPrize, hasMinAny=data.hasMinAny;
+  var today=new Date().toLocaleDateString('pt-BR');
+  var wb=XLSX.utils.book_new();
+
+  for(var pi=0;pi<data.pages.length;pi++){
+    var pg=data.pages[pi]; if(!pg.rows||pg.rows.length===0) continue;
+    var ws=[];
+    ws.push(['METAS DA CAMPANHA DE VENDAS']);
+    ws.push(['Vendedor: '+pg.vendor]);
+    ws.push(['Meta de crescimento: '+growthPct+'%   |   Gerado em: '+today]);
+    ws.push([]);
+    ws.push(['Regra: media exclui meses com zero vendas. Meta = max(media x (1+'+growthPct+'%), minimo definido).']);
+    ws.push([]);
+    var hdr=['Referencia'];
+    for(var mi=0;mi<pg.months.length;mi++) hdr.push(fm3(pg.months[mi]));
+    hdr.push('Media/Mes','Meses c/ Venda');
+    if(hasMinAny) hdr.push('Qtde Minima');
+    hdr.push('META','Regime');
+    if(hasPrize) hdr.push('Premio R$/peca');
+    ws.push(hdr);
+
+    var footM=new Array(pg.months.length).fill(0), fAvg=0, fMeta=0;
+    for(var ri=0;ri<pg.rows.length;ri++){
+      var row=pg.rows[ri], dr=[row.ref];
+      for(var mi2=0;mi2<row.monthVals.length;mi2++){
+        footM[mi2]+=row.monthVals[mi2];
+        dr.push(row.monthVals[mi2]===0?'':row.monthVals[mi2]);
+      }
+      fAvg+=row.avg; fMeta+=row.metaDisp;
+      dr.push(row.avg>0?parseFloat(row.avg.toFixed(2)):'');
+      dr.push(row.activeMonths>0?row.activeMonths:'');
+      if(hasMinAny) dr.push(row.minQ>0?row.minQ:'');
+      dr.push(row.metaDisp>0?row.metaDisp:'');
+      dr.push(row.byMin?'pelo minimo':'crescimento');
+      if(hasPrize) dr.push(row.prize>0?row.prize:'');
+      ws.push(dr);
+    }
+    var tot=['TOTAL'];
+    for(var fi=0;fi<footM.length;fi++) tot.push(footM[fi]);
+    tot.push(parseFloat(fAvg.toFixed(2)),'');
+    if(hasMinAny) tot.push('');
+    tot.push(fMeta,'');
+    if(hasPrize) tot.push('');
+    ws.push(tot);
+
+    var sheet=XLSX.utils.aoa_to_sheet(ws);
+    var cols=[{wch:30}];
+    for(var mc=0;mc<pg.months.length;mc++) cols.push({wch:9});
+    cols.push({wch:11},{wch:14});
+    if(hasMinAny) cols.push({wch:12});
+    cols.push({wch:10},{wch:14});
+    if(hasPrize) cols.push({wch:15});
+    sheet['!cols']=cols;
+    var sname=pg.vendor.replace(/[:\*?[\]]/g,'').substring(0,31).trim()||('V'+(pi+1));
+    XLSX.utils.book_append_sheet(wb,sheet,sname);
+  }
+  XLSX.writeFile(wb,'Metas_Campanha_'+new Date().toISOString().slice(0,10)+'.xlsx');
 }
 </script></body></html>
